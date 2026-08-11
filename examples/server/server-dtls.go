@@ -24,6 +24,7 @@ import (
     "fmt"
     "net"
     "os"
+    "syscall"
     wolfSSL "github.com/wolfssl/go-wolfssl"
 )
 
@@ -73,19 +74,27 @@ func main() {
     /* Close the listener when the application closes */
     defer conn.Close()
     fmt.Println("Listening on " + CONN_HOST + ":" + CONN_PORT)
-    buffer := make([]byte, 5)
-    _, addr, err := conn.ReadFromUDP(buffer)
+    /* Retrieve file descriptor from listening socket */
+    file,err := conn.File()
+    if err != nil {
+        fmt.Println("Error getting file descriptor: ", err.Error())
+        os.Exit(1)
+    }
+    defer file.Close()
+    fd := file.Fd()
+
+    /* Peek the client's address and bind the socket to it */
+    buffer := make([]byte, 1)
+    _, addr, err := syscall.Recvfrom(int(fd), buffer, syscall.MSG_PEEK)
     if err != nil {
         fmt.Println("Error reading from UDP: ", err.Error())
         os.Exit(1)
     }
-    /* Listen for an incoming connection */
-    c , err := net.DialUDP(CONN_TYPE, nil, addr)
+    err = syscall.Connect(int(fd), addr)
     if err != nil {
-        fmt.Println("Error accepting: ", err.Error())
+        fmt.Println("Error connecting to peer: ", err.Error())
         os.Exit(1)
     }
-    defer c.Close()
 
     /* Create a WOLFSSL object */
     ssl := wolfSSL.WolfSSL_new(ctx)
@@ -93,15 +102,6 @@ func main() {
         fmt.Println(" WolfSSL_new Failed");
         os.Exit(1)
     }
-
-    /* Retrieve file descriptor from connected socket */
-    file,err := c.File()
-    if err != nil {
-        fmt.Println("Error getting file descriptor: ", err.Error())
-        os.Exit(1)
-    }
-    defer file.Close()
-    fd := file.Fd()
     wolfSSL.WolfSSL_set_fd(ssl, int(fd))
 
     /* Establish TLS connection */
